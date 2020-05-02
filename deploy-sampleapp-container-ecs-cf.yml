@@ -144,7 +144,7 @@ Resources:
               Configuration:
                 ClusterName: !Ref SampleCluster
                 ServiceName: !Ref SampleService
-                FileName: build.json
+                FileName: imagedefinitions.json
               Name: deploy-to-ecs
               InputArtifacts:
                 - Name: BuildArtifacts
