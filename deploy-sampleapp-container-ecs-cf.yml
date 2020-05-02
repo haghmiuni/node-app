@@ -1,0 +1,392 @@
+Parameters:
+  CodePipelineName:
+    Type: String
+  GitHubOAuthToken:
+    Type: String
+    NoEcho: true
+    Description: Should have full repo permissions
+  GitHubRepo:
+    Type: String
+    Description: Your docker-ready GitHub repo.
+  GitHubBranch:
+    Type: String
+    Description: the branch you want this pipeline to watch
+  GitHubUsername:
+    Type: String
+    Description: your github username.  If it's an org repo, use the organization name
+  CodeBuildProjectName:
+    Type: String
+  SecurityGroupId:
+    Type: String
+    Description: Security Group for your ECS cluster
+  SubnetIds:
+    Type: List<String>
+    Description: comma separated list of subnetIds (at least 2)
+  VpcId:
+    Type: String
+  ECRRepoName:
+    Type: String
+    Description: Name of container and the ECR Repo
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: Network Configuration
+        Parameters:
+          - VpcId
+          - SubnetIds
+          - SecurityGroupId
+      -
+        Label:
+          default: Source Control
+        Parameters:
+          - GitHubRepo
+          - GitHubUsername
+          - GitHubBranch
+          - GitHubOAuthToken
+      -
+        Label:
+          default: Continuous Integration and Deployment
+        Parameters:
+          - CodeBuildProjectName
+          - CodePipelineName
+      -
+        Label:
+          default: Elastic Container Service
+        Parameters:
+          - ECRRepoName
+    ParameterLabels:
+      VpcId:
+        default: Which VPC should this ECS Service be deployed to?
+      CodeBuildProjectName:
+        default: Name your CodeBuild Project
+      CodePipelineName:
+        default: Name your CodePipelineProject
+      GitHubRepo:
+        default: GitHub repo
+      GitHubUsername:
+        default: GitHub Username or Organization
+      GitHubOAuthToken:
+        default: GitHubOAuthToken
+      ECRRepo:
+        default: container repo and container name
+
+Resources:
+  #################################################
+  # Codepipeline section
+  #################################################
+  SourceArtifactStore:
+    Type: AWS::S3::Bucket
+  BuildArtifactStore:
+    Type: AWS::S3::Bucket
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+        Name: buildOutput
+        NamespaceType: BUILD_ID
+      Source:
+        Type: CODEPIPELINE
+      ServiceRole: !GetAtt CodePipelineRole.Arn
+      Environment:
+        Type: LINUX_CONTAINER #the only allowed type.
+        ComputeType: BUILD_GENERAL1_SMALL #https://docs.aws.amazon.com/codebuild/latest/userguide/create-project.html#create-project-cli
+        Image: aws/codebuild/docker:17.09.0 #https://docs.aws.amazon.com/codebuild/latest/userguide/build-env-ref-available.html
+      Name: !Ref CodeBuildProjectName
+  CodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Type: S3
+        Location: !Ref SourceArtifactStore
+      Name: !Ref CodePipelineName
+      RestartExecutionOnUpdate: true #just a preference
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      Stages:
+        - Name: Source
+          Actions:
+            - ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: 1
+              Configuration:
+                Owner: !Ref GitHubUsername
+                Repo: !Ref GitHubRepo
+                Branch: !Ref GitHubBranch
+                OAuthToken: !Ref GitHubOAuthToken
+              Name: Source
+              OutputArtifacts:
+                - Name: SourceArtifacts
+        - Name: Build
+          Actions:
+            - ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName: !Ref CodeBuildProjectName
+              Name: Build
+              InputArtifacts:
+                - Name: SourceArtifacts
+              OutputArtifacts:
+                - Name: BuildArtifacts
+        - Name: Deploy
+          Actions:
+            - ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: ECS
+                Version: 1
+              Configuration:
+                ClusterName: !Ref SampleCluster
+                ServiceName: !Ref SampleService
+                FileName: build.json
+              Name: deploy-to-ecs
+              InputArtifacts:
+                - Name: BuildArtifacts
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: code-pipeline-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                  - s3:PutObject
+                  - s3:CreateBucket
+                  - codedeploy:CreateDeployment
+                  - codedeploy:GetApplicationRevision
+                  - codedeploy:GetDeployment
+                  - codedeploy:GetDeploymentConfig
+                  - codedeploy:RegisterApplicationRevision
+                  - codebuild:*
+                  - elasticbeanstalk:CreateApplicationVersion
+                  - elasticbeanstalk:DescribeApplicationVersions
+                  - elasticbeanstalk:DescribeEnvironments
+                  - elasticbeanstalk:DescribeEvents
+                  - elasticbeanstalk:UpdateEnvironment
+                  - autoscaling:DescribeAutoScalingGroups
+                  - autoscaling:DescribeLaunchConfigurations
+                  - autoscaling:DescribeScalingActivities
+                  - autoscaling:ResumeProcesses
+                  - autoscaling:SuspendProcesses
+                  - cloudformation:GetTemplate
+                  - cloudformation:DescribeStackResource
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStacks
+                  - cloudformation:UpdateStack
+                  - ec2:DescribeInstances
+                  - ec2:DescribeImages
+                  - ec2:DescribeAddresses
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeKeyPairs
+                  - elasticloadbalancing:DescribeLoadBalancers
+                  - rds:DescribeDBInstances
+                  - rds:DescribeOrderableDBInstanceOptions
+                  - sns:ListSubscriptionsByTopic
+                  - lambda:invokefunction
+                  - lambda:listfunctions
+                  - s3:ListBucket
+                  - s3:GetBucketPolicy
+                  - s3:GetObjectAcl
+                  - s3:PutObjectAcl
+                  - s3:DeleteObject
+                  - ssm:GetParameters
+                  - logs:*
+                  - ecr:DescribeImages
+                  - ecr:GetAuthorizationToken
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                  - ecr:InitiateLayerUpload
+                  - ecr:SetRepositoryPolicy
+                  - ecr:CompleteLayerUpload
+                  - ecr:BatchCheckLayerAvailability
+                  - ecs:*
+                  - iam:PassRole
+                Resource: '*'
+  ####################################
+  # ECS Section
+  ####################################
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref TargetGroup
+          Type: forward
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: sample-ecs-load-balancer
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref SecurityGroupId
+      Subnets:
+        - Fn::Select:
+            - 0
+            - !Ref SubnetIds
+        - Fn::Select:
+            - 1
+            - !Ref SubnetIds
+      Type: application
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn: LoadBalancer
+    Properties:
+      VpcId: !Ref VpcId
+      Port: 80
+      Protocol: HTTP
+      Matcher:
+        HttpCode: 200-299
+      HealthCheckIntervalSeconds: 80
+      HealthCheckPath: "/"
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 50
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 5
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: '60'
+      TargetType: ip
+  EcrRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref ECRRepoName
+  SampleCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: SampleCluster
+  SampleService:
+    DependsOn:
+      - EcrRepository
+      - SampleTaskDefinition
+      - Listener
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref SampleCluster
+      DesiredCount: 0
+      HealthCheckGracePeriodSeconds: 30
+      LaunchType: FARGATE
+      LoadBalancers:
+        - ContainerName: !Ref ECRRepoName
+          ContainerPort: 80
+          TargetGroupArn: !Ref TargetGroup
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref SecurityGroupId
+          Subnets:
+            - Fn::Select:
+                - 0
+                - !Ref SubnetIds
+            - Fn::Select:
+                - 1
+                - !Ref SubnetIds
+      ServiceName: sample-service
+      TaskDefinition: !Ref SampleTaskDefinition
+  SampleTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    DependsOn: EcrRepository
+    Properties:
+      ExecutionRoleArn: !Ref TaskExecutionRole
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      Cpu: 256
+      Memory: 0.5GB
+      ContainerDefinitions:
+        - Image:
+            !Sub
+              - "${accountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${repoName}"
+              - accountId: AWS::AccountId
+                region: AWS::Region
+                repoName: !Ref ECRRepoName
+          Name: !Ref ECRRepoName
+          Memory: 512
+          PortMappings:
+            - ContainerPort: 80
+              HostPort: 80
+              Protocol: tcp
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        !Sub
+          - ${repoName}-taskExecutionRole
+          - repoName: !Ref ECRRepoName
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+  ContainerAgentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: code-pipeline-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:DescribeListeners
+                  - elasticloadbalancing:DescribeLoadBalancers
+                  - elasticloadbalancing:DescribeTargetGroups
+                  - elasticloadbalancing:DescribeTargetHealth
+                  - elasticloadbalancing:DescribeLoadBalancerAttributes
+                  - elasticloadbalancing:DescribeTargetGroupAttributes
+                  - elasticloadbalancing:CreateListener
+                  - elasticloadbalancing:CreateRule
+                  - elasticloadbalancing:CreateTargetGroup
+                  - elasticloadbalancing:RegisterTargets
+                  - elasticloadbalancing:DeregisterTargets
+                  - elasticloadbalancing:ModifyListener
+                  - elasticloadbalancing:ModifyLoadBalancerAttributes
+                  - elasticloadbalancing:ModifyRule
+                  - elasticloadbalancing:ModifyTargetGroup
+                  - elasticloadbalancing:ModifyTargetGroupAttributes
+                  - elasticloadbalancing:SetIpAddressType
+                  - elasticloadbalancing:SetSecurityGroups
+                  - elasticloadbalancing:SetRulePriorities
+                  - elasticloadbalancing:SetSubnets
+                Resource: '*'
