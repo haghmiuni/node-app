@@ -9,7 +9,7 @@ const HOST = '0.0.0.0';
 // App
 const app = express();
 app.get('/', (req, res) => {
-  res.send('<h1 style="color:red;">Nginx-Verion 1---Java Home App - AWS Codepipeline/ECS CI/CD </h1> \n');
+  res.send('<h1 style="color:blue;">Nginx-Verion 1---Node JS App - AWS Codepipeline/ECS CI/CD </h1> \n');
 });
 
 app.listen(PORT, HOST);
