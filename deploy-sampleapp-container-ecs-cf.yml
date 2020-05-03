@@ -16,10 +16,7 @@ Parameters:
     Description: your github username.  If it's an org repo, use the organization name
   CodeBuildProjectName:
     Type: String
-  DesiredCount:
-    Type: Number
-    Default: 1
-    Description: How many copies of the service task to run    
+    Description: your CodeBuild project Name    
   SecurityGroupId:
     Type: String
     Description: Security Group for your ECS cluster
@@ -292,7 +289,7 @@ Resources:
     Type: AWS::ECS::Service
     Properties:
       Cluster: !Ref SampleCluster
-      DesiredCount: Ref 'DesiredCount'
+      DesiredCount: 1
       HealthCheckGracePeriodSeconds: 30
       LaunchType: FARGATE
       LoadBalancers:
