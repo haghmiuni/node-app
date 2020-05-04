@@ -37,7 +37,7 @@ Create a task defination:
 Click Add Container:
 Under Standar section:
 name=nodeapp
-Image=397374846593.dkr.ecr.us-east-1.amazonaws.com/node-app:latest
+Image=<YOUR AWS ACCOUNT>.dkr.ecr.us-east-1.amazonaws.com/node-app:latest
 MEM Softlimit=128
 Port mappings=8080
 
